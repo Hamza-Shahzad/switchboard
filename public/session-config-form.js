@@ -77,15 +77,13 @@
         changed();
       });
     }
-    // Codex's reasoning efforts depend on the model, and a scheduled run starts
-    // with nobody watching. So levels the chosen model does not support are
-    // disabled, and a selection it does not support goes back to Default with a
-    // note saying why. Without the catalog (codex never fetched it), or for a
-    // model it does not list, every level stays available.
-    const catalogField = fields.find(f => f.catalog === 'codex');
+    // Reasoning efforts depend on the model, and a scheduled run starts with
+    // nobody watching. Unsupported levels are disabled, and an invalid current
+    // selection returns to Default. Without a catalog every level stays available.
+    const catalogField = fields.find(f => f.catalog);
     const effortFields = fields.filter(f => f.modelField);
-    if (catalogField && effortFields.length && root.api?.getCodexModels) {
-      root.api.getCodexModels().then(models => {
+    if (catalogField && effortFields.length && root.api?.getHarnessModels) {
+      root.api.getHarnessModels(runtime).then(models => {
         if (!container.isConnected || !Array.isArray(models) || !models.length) return;
         const byModel = new Map(models.map(m => [m.slug, m]));
         const datalist = container.querySelector(`#${CSS.escape(listId(catalogField))}`);

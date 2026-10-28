@@ -30,7 +30,7 @@ try { require('electron-reloader')(module, { watchRenderer: true }); } catch {};
 // LC_CTYPE when the launch environment has no locale. See pty-env.js.
 const { buildPtyEnv } = require('./pty-env');
 const cleanPtyEnv = buildPtyEnv(process.env);
-const { shouldStartFresh, shouldBlockArchivedSession } = require('./session-launch');
+const { shouldStartFresh, shouldBlockArchivedSession, pendingInitialPrompt } = require('./session-launch');
 const { createTerminalActivity } = require('./terminal-activity');
 
 // Shell profiles → shell-profiles.js
@@ -45,6 +45,10 @@ const { PREVIEW_SCHEME, PREVIEW_SCHEMES, handlePreviewAssetRequest } = require('
 protocol.registerSchemesAsPrivileged(PREVIEW_SCHEMES);
 const { createTaskManager } = require('./task-manager');
 const { lastAssistantMessage } = require('./session-preview');
+const { createKimiAcpClient } = require('./kimi-acp-client');
+const { prepareKimiLaunch } = require('./kimi-launch');
+const { createKimiStatus, readKimiStatus } = require('./kimi-status');
+const { materializeKimiAgentOptions } = require('./kimi-agent-options');
 
 
 // --- Auto-updater (only in packaged builds) ---
@@ -95,6 +99,12 @@ const PROJECTS_DIR = claudeHarness.sessionsRoot();
 const PLANS_DIR = path.join(os.homedir(), '.claude', 'plans');
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
 const STATS_CACHE_PATH = path.join(CLAUDE_DIR, 'stats-cache.json');
+const { createPlanFiles } = require('./plan-files');
+const planFiles = createPlanFiles({
+  claudePlansDir: PLANS_DIR,
+  kimiHarness: getHarness('kimi'),
+  includeKimi: () => harnessEnabled('kimi'),
+});
 const MAX_BUFFER_SIZE = 256 * 1024;
 
 // Active PTY sessions
@@ -485,7 +495,9 @@ ipcMain.handle('get-project-plan', guarded((id) => projects.readProjectPlan(id))
 ipcMain.handle('set-plan-item', guarded((id, kind, line, done) => projects.setPlanItem(id, kind, line, done)));
 ipcMain.handle('append-plan-item', guarded((id, kind, text) => projects.appendPlanItem(id, kind, text)));
 ipcMain.handle('edit-plan-item', guarded((id, kind, line, text) => projects.editPlanItem(id, kind, line, text)));
-ipcMain.handle('adopt-plan', guarded((id, filename, opts) => projects.adoptPlan(id, filename, opts || {})));
+ipcMain.handle('adopt-plan', guarded((id, filename, opts) => projects.adoptPlan(id, filename, {
+  ...(opts || {}), sourcePath: planFiles.resolvePlanPath(filename),
+})));
 ipcMain.handle('list-templates', guarded(() => projects.listTemplates()));
 
 // --- IPC: get-projects ---
@@ -648,33 +660,15 @@ ipcMain.handle('get-projects', (_event, showArchived) => {
 // --- IPC: get-plans ---
 ipcMain.handle('get-plans', () => {
   try {
-    if (!fs.existsSync(PLANS_DIR)) return [];
-    const files = fs.readdirSync(PLANS_DIR).filter(f => f.endsWith('.md'));
-    const plans = [];
-    for (const file of files) {
-      const filePath = path.join(PLANS_DIR, file);
-      try {
-        const stat = fs.statSync(filePath);
-        const content = fs.readFileSync(filePath, 'utf8');
-        const firstLine = content.split('\n').find(l => l.trim());
-        const title = firstLine && firstLine.startsWith('# ')
-          ? firstLine.slice(2).trim()
-          : file.replace(/\.md$/, '');
-        plans.push({ filename: file, title, modified: stat.mtime.toISOString() });
-      } catch {}
-    }
-    plans.sort((a, b) => new Date(b.modified) - new Date(a.modified));
-
-    // Index plans for FTS
+    const plans = planFiles.listPlans();
     try {
       deleteSearchType('plan');
       upsertSearchEntries(plans.map(p => ({
         id: p.filename, type: 'plan', folder: null,
         title: p.title,
-        body: fs.readFileSync(path.join(PLANS_DIR, p.filename), 'utf8'),
+        body: fs.readFileSync(p.filePath, 'utf8'),
       })));
     } catch {}
-
     return plans;
   } catch (err) {
     console.error('Error reading plans:', err);
@@ -685,7 +679,7 @@ ipcMain.handle('get-plans', () => {
 // --- IPC: read-plan ---
 ipcMain.handle('read-plan', (_event, filename) => {
   try {
-    const filePath = path.join(PLANS_DIR, path.basename(filename));
+    const filePath = planFiles.resolvePlanPath(filename);
     const content = fs.readFileSync(filePath, 'utf8');
     return { content, filePath };
   } catch (err) {
@@ -698,7 +692,7 @@ ipcMain.handle('read-plan', (_event, filename) => {
 ipcMain.handle('save-plan', (_event, filePath, content) => {
   try {
     const resolved = path.resolve(filePath);
-    if (!resolved.startsWith(PLANS_DIR)) {
+    if (!planFiles.isPlanPath(resolved)) {
       return { ok: false, error: 'path outside plans directory' };
     }
     fs.writeFileSync(resolved, content, 'utf8');
@@ -812,7 +806,10 @@ ipcMain.handle('get-memories', () => {
   const hiddenProjects = new Set(global.hiddenProjects || []);
 
   // --- Global files ---
-  const globalFiles = scanMdFiles(CLAUDE_DIR).map(f => ({ ...f, displayPath: '~/.claude' }));
+  const globalFiles = [
+    ...scanMdFiles(CLAUDE_DIR).map(f => ({ ...f, displayPath: '~/.claude' })),
+    ...scanMdFiles(getHarness('kimi').kimiHome()).map(f => ({ ...f, displayPath: '~/.kimi-code', source: 'kimi-home' })),
+  ];
 
   // --- Per-project files ---
   const projects = [];
@@ -850,9 +847,9 @@ ipcMain.handle('get-memories', () => {
           seenPaths.add(f.filePath);
         }
 
-        // 2. {projectPath}/ — project root CLAUDE.md, agents.md
+        // 2. {projectPath}/ — project root instruction files
         if (projectPath) {
-          for (const name of ['CLAUDE.md', 'GEMINI.md', 'agents.md']) {
+          for (const name of ['CLAUDE.md', 'GEMINI.md', 'AGENTS.md', 'agents.md']) {
             const fp = path.join(projectPath, name);
             try {
               if (fs.existsSync(fp)) {
@@ -1041,6 +1038,12 @@ const SETTING_DEFAULTS = {
   codexApproval: '',
   codexModel: '',
   codexEffort: '',
+  kimiPermissionMode: 'manual',
+  kimiPlan: false,
+  kimiModel: '',
+  kimiEffort: '',
+  kimiAllowedTools: '',
+  kimiAgentInstructions: '',
 };
 
 // --- Harness enablement ---
@@ -1066,9 +1069,8 @@ ipcMain.handle('get-harnesses', () => {
     .map(h => ({ id: h.id, label: h.label, enabled: !disabled.has(h.id) }));
 });
 
-// Codex's model catalog, for model suggestions and the per-model reasoning
-// efforts in session and schedule settings.
 ipcMain.handle('get-codex-models', () => getHarness('codex')?.readModelCatalog?.() || []);
+ipcMain.handle('get-harness-models', (_event, runtime) => getHarness(runtime)?.readModelCatalog?.() || []);
 
 ipcMain.handle('get-shell-profiles', () => {
   _shellProfiles = null; // refresh on each request
@@ -1363,7 +1365,55 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
 
   let ptyProcess;
   let mcpServer = null;
+  let preparedKimiSessionId = null;
+  let kimiAgentCleanup = null;
+  const kimiForkFrom = sessionOptions?.forkFrom || null;
+  const hasKimiAgentOptions = runtimeId === 'kimi' && startFresh && !kimiForkFrom
+    && !!(sessionOptions?.kimiAllowedTools || sessionOptions?.kimiAgentInstructions);
+  if (hasKimiAgentOptions) {
+    const agent = materializeKimiAgentOptions({
+      dataDir: app.getPath('userData'), launchId: sessionId,
+      allowedTools: sessionOptions.kimiAllowedTools,
+      instructions: sessionOptions.kimiAgentInstructions,
+    });
+    kimiAgentCleanup = agent.cleanup;
+    sessionOptions = { ...sessionOptions, kimiAgentFile: agent.filePath };
+  }
   try {
+    if (!isPlainTerminal && runtimeId === 'kimi' && startFresh && !hasKimiAgentOptions) {
+      const pre = sessionOptions?.preLaunchCmd ? String(sessionOptions.preLaunchCmd) : '';
+      if (/[\r\n]/.test(pre)) return { ok: false, error: 'preLaunchCmd must not contain newlines' };
+      const additionalDirectories = sessionOptions?.addDirs
+        ? String(sessionOptions.addDirs).split(',').map(d => d.trim()).filter(Boolean) : [];
+      const acpEnv = {
+        ...cleanPtyEnv, ...projectEnv,
+        ...harness.launchEnv?.(sessionId, sessionOptions),
+      };
+      const client = createKimiAcpClient({
+        cwd: projectPath,
+        env: acpEnv,
+        ...(pre ? { command: shell, args: shellArgs(shell, `${pre} kimi acp`, shellExtraArgs) } : {}),
+      });
+      try {
+        await client.initialize();
+        preparedKimiSessionId = await prepareKimiLaunch(client, {
+          cwd: projectPath,
+          forkFrom: sessionOptions.forkFrom,
+          initialPrompt: sessionOptions.initialPrompt,
+          additionalDirectories,
+          model: sessionOptions.kimiModel,
+          permissionMode: sessionOptions.kimiPermissionMode,
+          plan: sessionOptions.kimiPlan,
+        });
+      } finally {
+        client.dispose();
+      }
+      if (preparedKimiSessionId) {
+        sessionOptions = { ...sessionOptions };
+        delete sessionOptions.forkFrom;
+        delete sessionOptions.initialPrompt;
+      }
+    }
     if (isPlainTerminal) {
       // Plain terminal: interactive login shell, no claude command
       // Do not inherit Claude Code's nested-session marker if Switchboard was
@@ -1385,7 +1435,9 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
       // Argv is built by the harness and quoted here, so a value can never be
       // spliced into the command line as shell syntax.
       const cliArgs = harness.buildLaunchArgs({
-        sessionId, isNew: startFresh, options: sessionOptions,
+        sessionId: preparedKimiSessionId || sessionId,
+        isNew: preparedKimiSessionId ? false : startFresh,
+        options: sessionOptions,
       });
 
       let claudeCmd = harness.binary;
@@ -1417,9 +1469,11 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
         TERM_PROGRAM: 'iTerm.app', TERM_PROGRAM_VERSION: '3.6.6', FORCE_COLOR: '3', ITERM_SESSION_ID: '1',
         ...projectEnv,
       };
-      // A harness that cannot be told its session id up front gets to stamp the
-      // environment instead, so its transcript can be recognised afterwards.
-      if (startFresh && harness.launchEnv) Object.assign(ptyEnv, harness.launchEnv(sessionId));
+      // Codex stamps new sessions for later transcript matching. Kimi's
+      // per-process thinking override applies to both new and resumed sessions.
+      if (harness.launchEnv && (startFresh || runtimeId === 'kimi')) {
+        Object.assign(ptyEnv, harness.launchEnv(sessionId, sessionOptions));
+      }
       if (mcpServer) {
         ptyEnv.CLAUDE_CODE_SSE_PORT = String(mcpServer.port);
       }
@@ -1437,6 +1491,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
 
     }
   } catch (err) {
+    if (kimiAgentCleanup) kimiAgentCleanup();
     return { ok: false, error: `Error spawning PTY: ${err.message}` };
   }
 
@@ -1445,7 +1500,11 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     outputBuffer: [], outputBufferSize: 0, altScreen: false,
     projectPath, firstResize: true,
     projectFolder, knownJsonlFiles, sessionSlug,
-    isPlainTerminal, runtime: runtimeId, forkFrom: sessionOptions?.forkFrom || null,
+    isPlainTerminal, runtime: runtimeId, forkFrom: kimiForkFrom,
+    realSessionId: preparedKimiSessionId,
+    freshKimiTranscript: startFresh && !preparedKimiSessionId,
+    kimiStatus: runtimeId === 'kimi' ? createKimiStatus() : null,
+    kimiStatusFile: null, kimiStatusOffset: 0,
     // A plain terminal has no CLI to report a busy state, so one is derived
     // from the shell's own OSC 133 prompt marks, or from the PTY's foreground
     // process when the shell sends none. A harness session already has the
@@ -1462,17 +1521,21 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     trackId: sessionOptions?.trackId || null,
     // Set for a harness whose real session id only appears once its transcript
     // does; cleared by resolvePendingLaunches when the transcript is matched.
-    pendingLaunch: (harness?.needsIdDetection?.({ isNew: startFresh, options: sessionOptions })) ? {
+    pendingLaunch: (!preparedKimiSessionId && harness?.needsIdDetection?.({ isNew: startFresh, options: sessionOptions })) ? {
       tag: harness.originatorTag ? harness.originatorTag(sessionId) : null,
       // A fork is identified by its parent, not by our env tag — codex copies
       // the originator from the thread being forked.
-      forkFrom: sessionOptions?.forkFrom || null,
+      forkFrom: kimiForkFrom,
+      initialPrompt: pendingInitialPrompt({
+        runtimeId, hasAgentOptions: hasKimiAgentOptions, initialPrompt: sessionOptions?.initialPrompt,
+      }),
       projectPath,
       spawnedAt: Date.now(),
     } : null,
     mcpServer, _openedAt: Date.now(),
   };
-  activeSessions.set(sessionId, session);
+  const launchedSessionId = preparedKimiSessionId || sessionId;
+  activeSessions.set(launchedSessionId, session);
   if (session.activity) startTerminalActivitySweep();
 
   // A session launched from a project is filed there. Recorded under whatever
@@ -1480,13 +1543,13 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
   // id for a harness that only learns its id from the transcript.
   if (startFresh && !isPlainTerminal && sessionOptions?.projectId) {
     try {
-      const assignment = projects.recordLaunchAssignment(sessionId, sessionOptions);
+      const assignment = projects.recordLaunchAssignment(launchedSessionId, sessionOptions);
       if (assignment) {
         session.projectId = assignment.projectId;
         session.trackId = assignment.trackId;
         // Started from a phase or a todo on the project page.
         const item = sessionOptions.planItem;
-        if (item?.itemText) projects.recordPlanLink(assignment.projectId, item.file, item.itemText, sessionId, 'started');
+        if (item?.itemText) projects.recordPlanLink(assignment.projectId, item.file, item.itemText, launchedSessionId, 'started');
       }
     } catch (err) {
       log.error('[projects] could not record launch assignment', err);
@@ -1496,9 +1559,12 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
   // remembers the run. Folder schedules have no project, so this is separate
   // from the assignment above.
   if (startFresh && !isPlainTerminal && sessionOptions?.scheduleId) {
-    try { projects.recordScheduleRun(sessionOptions.scheduleId, sessionId); } catch (err) {
+    try { projects.recordScheduleRun(sessionOptions.scheduleId, launchedSessionId); } catch (err) {
       log.error('[schedule] could not record the run', err);
     }
+  }
+  if (preparedKimiSessionId) {
+    mainWindow.webContents.send('session-detected', sessionId, preparedKimiSessionId);
   }
   // A resumed project session is a project session too, for the plan watcher.
   if (!isPlainTerminal && !session.projectId) {
@@ -1645,6 +1711,10 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
 
   ptyProcess.onExit(({ exitCode, signal }) => {
     session.exited = true;
+    if (kimiAgentCleanup) {
+      kimiAgentCleanup();
+      kimiAgentCleanup = null;
+    }
     // Clean up MCP server
     const mcpId = session.realSessionId || sessionId;
     shutdownMcpServer(mcpId);
@@ -1657,6 +1727,10 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     // stop-session flag along rather than making it guess from the code.
     const stopRequested = !!session.stopRequested;
     if (!appIsQuitting && mainWindow && !mainWindow.isDestroyed()) {
+      if (session.runtime === 'kimi' && session._cliBusy) {
+        session._cliBusy = false;
+        mainWindow.webContents.send('cli-busy-state', realId, false);
+      }
       mainWindow.webContents.send('process-exited', realId, exitCode, signal, stopRequested);
       // If a fork/plan-accept transition re-keyed this session under realId
       // but the PTY exited before transition detection ran, also notify the
@@ -1674,7 +1748,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     log.info(`[fork-spawn] tempId=${sessionId} forkFrom=${sessionOptions.forkFrom} folder=${projectFolder} knownFiles=${knownJsonlFiles.size}`);
   }
 
-  return { ok: true, reattached: false, mcpActive: !!mcpServer };
+  return { ok: true, reattached: false, mcpActive: !!mcpServer, sessionId: launchedSessionId };
 });
 
 // --- IPC: terminal-input (fire-and-forget) ---
@@ -1874,6 +1948,7 @@ function resolvePendingLaunches(candidatePaths) {
       if (activeSessions.has(signals.sessionId)) continue;
 
       const realId = signals.sessionId;
+      const initialPrompt = session.pendingLaunch.initialPrompt;
       log.info(`[launch-detect] ${tempId} → ${realId} (originator=${signals.originator || 'none'})`);
       session.realSessionId = realId;
       session.pendingLaunch = null;
@@ -1889,6 +1964,7 @@ function resolvePendingLaunches(candidatePaths) {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('session-detected', tempId, realId);
       }
+      if (initialPrompt && !session.exited) session.pty.write(initialPrompt + '\r');
       break;
     }
   }
@@ -1937,9 +2013,8 @@ function hasPendingLaunches() {
 
 // --- fs.watch on each non-Claude harness's sessions directory ---
 //
-// Separate from startProjectsWatcher because the path shape is different: a
-// Claude event names <project-folder>/<file>, a codex event names
-// <YYYY>/<MM>/<DD>/<file>. Both end up calling refreshFolder with a folder key.
+// Claude has a separate watcher because its root is injected for dev/tests.
+// Every other harness maps its own event path to a folder key for refreshFolder.
 const harnessWatchers = [];
 
 function resolveHarnessFolderPath(folder) {
@@ -1950,6 +2025,35 @@ function resolveHarnessFolderPath(folder) {
 function stopHarnessWatchers() {
   while (harnessWatchers.length) {
     try { harnessWatchers.pop().close(); } catch {}
+  }
+}
+
+function updateKimiActivity(sessionId, session) {
+  if (session.runtime !== 'kimi' || session.exited) return;
+  const filePath = getHarness('kimi').transcriptPath({ sessionId });
+  if (!filePath || !fs.existsSync(filePath)) return;
+  try {
+    if (session.kimiStatusFile !== filePath) {
+      session.kimiStatusFile = filePath;
+      session.kimiStatusOffset = session.freshKimiTranscript ? 0 : fs.statSync(filePath).size;
+    }
+    const result = readKimiStatus(filePath, session.kimiStatusOffset, session.kimiStatus);
+    session.kimiStatusOffset = result.offset;
+    for (const activity of result.activities) {
+      if (!mainWindow || mainWindow.isDestroyed()) continue;
+      if (activity.kind === 'busy') {
+        session._cliBusy = true;
+        mainWindow.webContents.send('cli-busy-state', sessionId, true);
+      } else if (activity.kind === 'idle') {
+        session._cliBusy = false;
+        mainWindow.webContents.send('cli-busy-state', sessionId, false);
+        mainWindow.webContents.send('terminal-notification', sessionId, 'Kimi is waiting for your input', 'idle');
+      } else if (activity.kind === 'attention') {
+        mainWindow.webContents.send('terminal-notification', sessionId, activity.message, 'attention');
+      }
+    }
+  } catch (err) {
+    log.debug(`[kimi-status] session=${sessionId} ${err.message}`);
   }
 }
 
@@ -1978,6 +2082,9 @@ function startHarnessWatchers() {
         resolvePendingLaunches(candidates);
       }
 
+      if (h.id === 'kimi') {
+        for (const [sessionId, session] of activeSessions) updateKimiActivity(sessionId, session);
+      }
       for (const folder of folders) {
         try { refreshFolder(folder); } catch (err) { log.error('[harness-watch]', folder, err.message); }
       }
@@ -1987,12 +2094,10 @@ function startHarnessWatchers() {
 
     try {
       const watcher = fs.watch(root, { recursive: true }, (_eventType, filename) => {
-        if (!filename) return;
-        const parts = filename.split(path.sep);
-        // Transcripts sit at <YYYY>/<MM>/<DD>/<file>; anything shallower is a
-        // directory being created, which the next file event will cover.
-        if (parts.length < 4 || !parts[parts.length - 1].endsWith('.jsonl')) return;
-        pendingFolders.add(h.folderPrefix + parts.slice(0, 3).join('/'));
+        if (!filename || !h.folderForFileEvent) return;
+        const folder = h.folderForFileEvent(String(filename));
+        if (!folder) return;
+        pendingFolders.add(folder);
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(flush, 500);
       });

@@ -1063,7 +1063,7 @@ async function launchNewSession(project, sessionOptions, { focus = true } = {}) 
 
   // A scheduled launch runs in the background: it shows up in the lists like
   // any session, but does not take over whatever the user is looking at.
-  if (focus) showSession(sessionId);
+  if (focus) showSession(result.sessionId || sessionId);
   pollActiveSessions();
 }
 
@@ -1577,7 +1577,7 @@ function buildQuotaBar(row) {
   pctEl.textContent = pct + '%';
   wrap.appendChild(pctEl);
 
-  const who = row.runtime === 'codex' ? 'Codex' : 'Claude';
+  const who = ICONS.labelForRuntime(row.runtime);
   wrap.title = `${who} \u2014 ${row.label}: ${pct}%` + (row.reset ? ` \u2014 resets ${row.reset}` : '');
   return wrap;
 }
@@ -1604,8 +1604,8 @@ function buildQuotaGroup(runtime, rows) {
 
   const icon = document.createElement('span');
   icon.className = 'quota-runtime-icon';
-  icon.innerHTML = runtime === 'codex' ? ICONS.codex(12) : ICONS.claude(12);
-  icon.title = runtime === 'codex' ? 'Codex' : 'Claude';
+  icon.innerHTML = ICONS.forRuntime(runtime, 12);
+  icon.title = ICONS.labelForRuntime(runtime);
   group.appendChild(icon);
 
   for (const row of rows) group.appendChild(buildQuotaBar(row));

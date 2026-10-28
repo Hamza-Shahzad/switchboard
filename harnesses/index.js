@@ -1,9 +1,8 @@
 // Harness registry.
 //
-// A "harness" is a CLI that drives a model and records its sessions on disk —
-// `claude`, and (next) `codex`. Each one owns its transcript layout, its
-// transcript format, and its launch flags; the rest of the app addresses them
-// only through the shape below.
+// A "harness" is a CLI that drives a model and records its sessions on disk.
+// Each one owns its transcript layout, transcript format, and launch flags;
+// the rest of the app addresses them only through the shape below.
 //
 // Note the name: `agent` already means a Claude *subagent* elsewhere in this
 // codebase (session_cache.agentId, subagentType), so a harness is deliberately
@@ -31,8 +30,9 @@
 
 const claude = require('./claude');
 const codex = require('./codex');
+const kimi = require('./kimi');
 
-const HARNESSES = { [claude.id]: claude, [codex.id]: codex };
+const HARNESSES = { [claude.id]: claude, [codex.id]: codex, [kimi.id]: kimi };
 
 const DEFAULT_HARNESS = claude.id;
 

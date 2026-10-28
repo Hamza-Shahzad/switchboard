@@ -19,4 +19,8 @@ function shouldBlockArchivedSession({ isNew, isPlainTerminal, archived }) {
   return !isNew && !isPlainTerminal && !!archived;
 }
 
-module.exports = { shouldStartFresh, shouldBlockArchivedSession };
+function pendingInitialPrompt({ runtimeId, hasAgentOptions, initialPrompt }) {
+  return runtimeId === 'kimi' && hasAgentOptions ? initialPrompt || null : null;
+}
+
+module.exports = { shouldStartFresh, shouldBlockArchivedSession, pendingInitialPrompt };

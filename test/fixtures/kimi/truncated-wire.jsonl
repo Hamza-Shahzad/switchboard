@@ -1,0 +1,2 @@
+{"type":"agent.message.appended","message":{"message":{"role":"user","content":[{"type":"text","text":"Truncated session prompt"}],"toolCalls":[]},"meta":{"source":"user","userMessageId":"user-truncated"}},"type":"agent.message.appended","time":1760000010000,"kind":"user"}
+{"type":"agent.message.appended","message":{"message":{"role":"assistant","content":[{"type":"text","text":"Incomplete

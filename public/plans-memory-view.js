@@ -24,7 +24,7 @@ function renderPlans(plans) {
   if (plans.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'plans-empty';
-    empty.textContent = 'No plans found in ~/.claude/plans/';
+    empty.textContent = 'No plans found in ~/.claude/plans/ or Kimi sessions.';
     plansContent.appendChild(empty);
     return;
   }

@@ -36,21 +36,25 @@ Packaged builds check GitHub Releases for updates on launch and every 4 hours, d
 
 ## Supported CLIs
 
-| | Claude Code (`claude`) | Codex (`codex`) |
-|---|---|---|
-| Browse and search history | ✅ | ✅ |
-| Resume a session | ✅ | ✅ |
-| Start a new session | ✅ | ✅ |
-| Fork a session | ✅ | ✅ |
-| Read in the message viewer | ✅ | ✅ |
-| Status and activity indicators | ✅ | ✅ |
-| Session names from `/rename` | ✅ | — |
-| IDE emulation (diff review) | ✅ | — |
-| Plans and memory files | ✅ | — |
+| | Claude Code (`claude`) | Codex (`codex`) | Kimi Code (`kimi`) |
+|---|---|---|---|
+| Browse and search history | ✅ | ✅ | ✅ |
+| Resume a session | ✅ | ✅ | ✅ |
+| Start a new session | ✅ | ✅ | ✅ |
+| Fork a session | ✅ | ✅ | ✅ |
+| Read in the message viewer | ✅ | ✅ | ✅ |
+| Status and activity indicators | ✅ | ✅ | ✅ |
+| Session names from `/rename` or `/title` | ✅ | — | ✅ |
+| IDE emulation (diff review) | ✅ | — | — |
+| Plans and memory files | ✅ | — | ✅ |
+| Chrome automation | ✅ | — | — |
+| Account quota display | ✅ | ✅ | — |
 
-Sessions from both CLIs share one sidebar, each row marked with its CLI's logo. A fork runs on the CLI that wrote the session being forked.
+Sessions from all supported CLIs share one sidebar, each row marked with its CLI's logo. A fork runs on the CLI that wrote the session being forked.
 
-Turn either CLI off under **CLI Agents** in Settings. A switched-off CLI is not scanned, not watched, and not offered when you start a session, and its sessions are hidden. Its history is kept, so switching it back on restores everything immediately. At least one CLI always stays on.
+Turn any CLI off under **CLI Agents** in Settings. A switched-off CLI is not scanned, not watched, and is not offered when you start a session, and its sessions are hidden. Its history is kept, so switching it back on restores everything immediately. At least one CLI always stays on.
+
+Kimi support requires **Kimi Code 2.3.2 or newer**. Switchboard uses Kimi's ACP interface to create and fork sessions, then resumes them in the built-in terminal. Complete `kimi login` before starting a Kimi session; `kimi doctor` checks the local configuration. Kimi IDE diff emulation, Chrome automation, and account quota display are not currently supported.
 
 ## Features at a glance
 
@@ -64,7 +68,7 @@ Turn either CLI off under **CLI Agents** in Settings. A switched-off CLI is not 
 - **Projects** — Group work by what it is, not where it lives: a folder on disk, a brief the agent reads, a plan, a todo list, and the sessions filed under it.
 - **Project tasks and server logs** — Run `.vscode/tasks.json` commands and keep their logs beside your sessions.
 - **Scheduled tasks** — Start a session with a prompt on a timer, in a project, a track, or any folder.
-- **Plans and memory** (Claude only) — Browse and edit plan files and `CLAUDE.md` in one place.
+- **Plans and memory** — Browse and edit Claude and Kimi plan files and instruction files in one place.
 - **Activity stats** — Heatmap of your coding activity across all projects.
 
 ## Sessions
@@ -79,16 +83,17 @@ Each CLI exposes its own options when you start or resume a session:
 |---|---|
 | Claude Code | Permission mode, worktree, Chrome, model, effort |
 | Codex | Sandbox policy, approval policy, model, reasoning effort |
+| Kimi Code | Permission mode, Plan mode, model, thinking effort, allowed tools, additional agent instructions |
 
 Set them per session, per project, or globally in Settings. Model and effort are chosen per session or per schedule (Codex's model can also be set in Settings); left blank, each CLI uses its own default.
 
-The optional settings (model, effort, allowed tools, additional system prompt, pre-launch command, and additional directories) sit under **More options**, and show on their own once they have a value. Codex's reasoning effort is limited to what the chosen model supports, read from Codex's own model list: choosing a model that does not support the current effort sets it back to Default.
+The optional settings (model, effort, allowed tools, additional system prompt or agent instructions, pre-launch command, and additional directories) sit under **More options**, and show on their own once they have a value. Codex and Kimi reasoning efforts are limited to what the chosen model supports: choosing a model that does not support the current effort sets it back to Default. Kimi's tool allowlist and additional agent instructions apply only when creating a session; its agent binding is restored automatically on resume.
 
 ### Scheduled tasks
 
 A scheduled task starts a session with a prompt on a timer: every 15 or 30 minutes, every hour, every day, on weekdays, or every week. Create one with **New scheduled task…** from a project's right-click menu, the **Schedules** button on a project's page, or the clock on a folder in the Sessions tab. Each task's menu shows when it runs next and can edit it, run it now, turn it off, or delete it. Sessions a schedule started are marked with a clock.
 
-Schedules use the same CLI-specific configuration form as **New Session → Configure**. Choose **Use folder defaults** to follow the current settings at each run, or **Customize** to save individual overrides. Each customized field can be reset to its folder default, and Claude and Codex choices are kept separately when switching CLIs.
+Schedules use the same CLI-specific configuration form as **New Session → Configure**. Choose **Use folder defaults** to follow the current settings at each run, or **Customize** to save individual overrides. Each customized field can be reset to its folder default, and Claude, Codex, and Kimi choices are kept separately when switching CLIs.
 
 Legacy schedule imports keep permission mode, allowed tools, additional directories, appended system instructions, and the model, with the old runner's defaults saved explicitly. Budget is intentionally omitted, and effort is left unset. Successfully imported schedules are left alone on later scans.
 
@@ -96,7 +101,7 @@ For Project View schedules, defaults come from the track's starting folder, then
 
 ### Status notifications
 
-Switchboard watches every session in the background, Claude and Codex alike, and shows status in the sidebar so you can tell at a glance which sessions need attention while you work in a different one.
+Switchboard watches every session in the background, including Claude, Codex, and Kimi, and shows status in the sidebar so you can tell at a glance which sessions need attention while you work in a different one.
 
 ![Status Notifications](build/screenshot-notifications.png)
 
@@ -158,10 +163,11 @@ None of these is read at the start of a session, only when the plan or the todos
 
 Sessions start in the project folder by default. A project or a track can choose an attached folder instead. Wherever a project session starts, Switchboard passes the project folder and every attached folder to the CLI as extra directories, so the agent can read and edit all of them.
 
-The two CLIs handle this differently:
+The CLIs handle this differently:
 
 - **Claude** loads the `CLAUDE.md` from each of those directories.
 - **Codex** only reads `AGENTS.md` from the folder it starts in, so a Codex session that starts in an attached folder does not see the project brief. Codex also refuses extra directories unless its sandbox is `workspace-write` or `danger-full-access`, so Switchboard's global default for Codex is `workspace-write`. Choose "Default" in Settings to hand the choice back to Codex's own config. Under `read-only` the extra directories are left off, since read-only can read every path anyway.
+- **Kimi** reads `AGENTS.md` from its starting folder and accepts repeatable `--add-dir` workspaces. Start in the project folder when the session needs the project brief.
 
 ### Overview and working mode
 

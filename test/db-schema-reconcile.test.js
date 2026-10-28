@@ -527,7 +527,7 @@ test('a pre-existing runtime column is adopted, not duplicated', () => {
 });
 
 for (const version of [4, 12]) {
-  test(`incremental columns upgrade a version-${version} database without losing metadata or search`, () => {
+  test(`incremental columns upgrade a version-${version} database without losing session metadata or search`, () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'switchboard-db-incremental-'));
     try {
       const seed = runInElectronNode(`
@@ -578,7 +578,7 @@ for (const version of [4, 12]) {
       assert.equal(state.meta.name, 'My name');
       assert.equal(state.meta.starred, 1);
       assert.equal(state.meta.archived, 1);
-      assert.equal(state.folder.indexMtimeMs, 123);
+      assert.equal(state.folder, null, 'Codex timestamp migration invalidates cache metadata');
       assert.equal(state.hits[0].id, 'kept');
       assert.equal(state.version, version);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }

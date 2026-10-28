@@ -1626,13 +1626,13 @@ function recordPlanLink(projectId, kind, itemText, sessionId, linkKind) {
 }
 
 /**
- * Copy a plan-mode plan from ~/.claude/plans into the project as plan.md.
+ * Copy a Claude or Kimi plan into the project as plan.md.
  * The tracker is left for a session to derive; the page says so.
  */
-function adoptPlan(projectId, filename, { replace = false } = {}) {
+function adoptPlan(projectId, filename, { replace = false, sourcePath = null } = {}) {
   const project = db.getProject(projectId);
   if (!project) return { error: 'Project not found' };
-  const source = path.join(plansDir, path.basename(String(filename || '')));
+  const source = sourcePath || path.join(plansDir, path.basename(String(filename || '')));
   if (!fs.existsSync(source)) return { error: 'That plan file no longer exists' };
   const target = path.join(project.root, 'plan.md');
   if (!replace && hasBody(readTextOrEmpty(target))) {

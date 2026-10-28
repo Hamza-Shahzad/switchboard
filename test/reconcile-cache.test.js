@@ -7,6 +7,13 @@ const path = require('path');
 const sessionCache = require('../session-cache');
 const { getFolderIndexMtimeMs } = require('../folder-index-state');
 
+const previousKimiHome = process.env.KIMI_CODE_HOME;
+process.env.KIMI_CODE_HOME = path.join(os.tmpdir(), 'switchboard-reconcile-no-kimi-home');
+test.after(() => {
+  if (previousKimiHome === undefined) delete process.env.KIMI_CODE_HOME;
+  else process.env.KIMI_CODE_HOME = previousKimiHome;
+});
+
 // Minimal valid session transcript: one line carries `cwd` (for deriveProjectPath)
 // and a user message (so readSessionFile yields a non-null session).
 function writeSession(folderPath, cwd) {

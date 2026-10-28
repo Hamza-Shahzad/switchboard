@@ -48,9 +48,7 @@ function showNewSessionPopover(project, anchorEl) {
   function render(harnesses) {
     popover.replaceChildren();
     for (const h of harnesses) {
-      const icon = h.id === 'codex'
-        ? ICONS.codex(16, 'popover-option-icon codex-icon')
-        : ICONS.claude(16, 'popover-option-icon claude-icon');
+      const icon = ICONS.forRuntime(h.id, 16, `popover-option-icon ${h.id}-icon`);
       addOption(`${icon} ${escapeHtml(h.label)}`, 'popover-option-' + h.id, async () => {
         popover.remove();
         const options = await resolveDefaultSessionOptions(project);
@@ -177,7 +175,7 @@ async function showNewSessionDialog(project, runtime = 'claude') {
   dialog.setAttribute('role', 'dialog');
   dialog.setAttribute('aria-modal', 'true');
   dialog.innerHTML = `
-    <h3>New ${escapeHtml(runtime === 'codex' ? 'Codex' : runtime === 'claude' ? 'Claude' : runtime)} Session — ${escapeHtml(shortProjectPath(project.projectPath))}</h3>
+    <h3>New ${escapeHtml(ICONS.labelForRuntime(runtime))} Session — ${escapeHtml(shortProjectPath(project.projectPath))}</h3>
     <div class="session-config-fields"></div>
     <div class="session-config-error" role="alert" hidden></div>
     <div class="new-session-actions">

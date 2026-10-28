@@ -1,0 +1,12 @@
+{"type":"metadata","protocol_version":"1.5","created_at":1760000000000}
+{"type":"turn.prompt","agentId":"main","input":{"content":[{"type":"text","text":"Synthetic user prompt"}]},"origin":{"kind":"user"},"promptId":"prompt-synthetic","turnId":"turn-synthetic","time":1760000001000}
+{"type":"agent.message.appended","message":{"message":{"role":"user","content":[{"type":"text","text":"Synthetic user prompt"}],"toolCalls":[]},"meta":{"source":"user","userMessageId":"user-synthetic"}},"type":"agent.message.appended","time":1760000001001,"kind":"user"}
+{"type":"context.append_message","agentId":"main","message":{"role":"user","content":[{"type":"text","text":"Synthetic user prompt"}],"id":"user-synthetic","toolCalls":[],"origin":{"kind":"user"}},"time":1760000001001}
+{"type":"agent.turn.started","turnId":"turn-synthetic","type":"agent.turn.started","time":1760000001002,"kind":"user"}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"content.part","uuid":"part-think","turnId":"turn-synthetic","step":1,"stepUuid":"step-synthetic","part":{"type":"think","think":"Synthetic readable reasoning","reasoningKey":"synthetic"}},"time":1760000002000}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"tool.call","uuid":"call-read","turnId":"turn-synthetic","step":1,"stepUuid":"step-synthetic","toolCallId":"tool-synthetic","name":"Read","args":{"path":"/tmp/switchboard-kimi-project/example.txt"}},"time":1760000003000}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"tool.result","parentUuid":"call-read","toolCallId":"tool-synthetic","result":{"output":"Synthetic tool output","durationMs":1}},"time":1760000004000}
+{"type":"agent.message.appended","message":{"message":{"role":"assistant","content":[{"type":"text","text":"Synthetic assistant reply"}],"toolCalls":[]},"meta":{"source":"model","messageId":"assistant-synthetic"}},"type":"agent.message.appended","time":1760000005000,"kind":"assistant"}
+{"type":"agent.turn.ended","turnId":"turn-synthetic","outcome":"completed","type":"agent.turn.ended","time":1760000005001,"kind":"user"}
+{"type":"turn.ended","agentId":"main","turnId":"turn-synthetic","reason":"completed","durationMs":4000,"traceId":"trace-synthetic","time":1760000005002}
+{"type":"prompt.completed","agentId":"main","promptId":"prompt-synthetic","finishedAt":1760000005003,"reason":"completed","time":1760000005003}

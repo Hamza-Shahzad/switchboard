@@ -28,6 +28,11 @@
     { value: 'high', label: 'High' }, { value: 'xhigh', label: 'Extra High' }, { value: 'max', label: 'Max' },
   ];
   const CODEX_EFFORTS = [...CLAUDE_EFFORTS, { value: 'ultra', label: 'Ultra' }];
+  const KIMI_PERMISSION_MODES = [
+    { value: 'manual', label: 'Always Ask', desc: 'Ask before tools that need approval' },
+    { value: 'yolo', label: 'Ask When Needed', desc: 'Routine work runs automatically; risky actions still ask' },
+    { value: 'auto', label: 'Never Ask', desc: 'Run automatically without interrupting for approval' },
+  ];
   const FIELDS = {
     claude: [
       { key: 'permissionMode', label: 'Permission Mode', type: 'permission', default: null, choices: PERMISSION_MODES },
@@ -47,6 +52,14 @@
       { key: 'codexModel', label: 'Model', type: 'text', default: '', more: true, placeholder: 'default', catalog: 'codex', description: "Blank uses Codex's default" },
       { key: 'codexEffort', label: 'Reasoning Effort', type: 'select', default: '', more: true, choices: CODEX_EFFORTS, modelField: 'codexModel', description: "Default uses Codex's own setting" },
       { key: 'dangerouslySkipPermissions', label: 'Bypass Approvals and Sandbox', type: 'boolean', default: false, description: 'Disables permission prompts and sandbox restrictions' },
+    ],
+    kimi: [
+      { key: 'kimiPermissionMode', label: 'Permission Mode', type: 'select', default: 'manual', choices: KIMI_PERMISSION_MODES },
+      { key: 'kimiPlan', label: 'Plan Mode', type: 'boolean', default: false, description: 'Start with read-only exploration and planning' },
+      { key: 'kimiModel', label: 'Model', type: 'text', default: '', more: true, placeholder: 'default', catalog: 'kimi', description: "Blank uses Kimi's default" },
+      { key: 'kimiEffort', label: 'Thinking Effort', type: 'select', default: '', more: true, choices: CLAUDE_EFFORTS, modelField: 'kimiModel', description: "Default uses Kimi's own setting" },
+      { key: 'kimiAllowedTools', label: 'Allowed Tools', type: 'text', default: '', more: true, wide: true, description: 'Tool allowlist for a new session (comma-separated); blank allows all tools' },
+      { key: 'kimiAgentInstructions', label: 'Additional Agent Instructions', type: 'textarea', default: '', more: true, wide: true, description: 'Appended to Kimi’s default agent instructions for a new session' },
     ],
   };
   const COMMON_FIELDS = [

@@ -5,8 +5,6 @@ const { getFolderIndexMtimeMs } = require('./folder-index-state');
 const { encodeProjectPath } = require('./encode-project-path');
 const { getHarness, DEFAULT_HARNESS, harnessForFolder, availableHarnesses } = require('./harnesses');
 
-// Only Claude sessions are indexed today; the harness lookup is here so the
-// call sites already read the right way when codex folders join them.
 const claude = getHarness(DEFAULT_HARNESS);
 const { deriveProjectPath, readSessionFile } = claude;
 
@@ -506,7 +504,7 @@ function populateCacheViaWorker() {
   sendStatus('Scanning projects\u2026', 'active');
 
   const worker = new Worker(path.join(__dirname, 'workers', 'scan-projects.js'), {
-    workerData: { projectsDir: PROJECTS_DIR },
+    workerData: { projectsDir: PROJECTS_DIR, folders: listAllFolders() },
   });
 
   worker.on('message', (msg) => {

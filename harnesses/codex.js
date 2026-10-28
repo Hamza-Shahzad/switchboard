@@ -166,6 +166,12 @@ function listTranscripts(dir) {
   }
 }
 
+function folderForFileEvent(filename) {
+  const parts = String(filename).split(/[\\/]/);
+  if (parts.length < 4 || !parts[parts.length - 1].endsWith('.jsonl')) return null;
+  return folderPrefix + parts.slice(0, 3).join('/');
+}
+
 /**
  * The session id is the uuid suffix of the file name.
  *
@@ -659,7 +665,7 @@ module.exports = {
   buildLaunchArgs, launchEnv, originatorTag, readLaunchSignals, matchesLaunch, needsIdDetection,
   readModelCatalog,
   available, codexHome, sessionsRoot, listFolders, folderPath, folderForProject,
-  listTranscripts, sessionIdFromPath, transcriptPath, isSubagentMeta,
+  listTranscripts, folderForFileEvent, sessionIdFromPath, transcriptPath, isSubagentMeta,
   deriveProjectPath,
   readSessionFile, toViewerEntries,
 };

@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('api', {
   saveMemory: (filePath, content) => ipcRenderer.invoke('save-memory', filePath, content),
   getProjects: (showArchived) => ipcRenderer.invoke('get-projects', showArchived),
   getHarnesses: () => ipcRenderer.invoke('get-harnesses'),
+  getHarnessModels: (runtime) => ipcRenderer.invoke('get-harness-models', runtime),
   getCodexModels: () => ipcRenderer.invoke('get-codex-models'),
   getActiveSessions: () => ipcRenderer.invoke('get-active-sessions'),
   getActiveTerminals: () => ipcRenderer.invoke('get-active-terminals'),

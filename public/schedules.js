@@ -364,7 +364,7 @@ function showScheduleDialog({ schedule = null, projectId = null, trackId = null,
       if (version !== configVersion || !dialog.isConnected) return;
       configRuntime = context.runtime || 'claude';
       effectiveDefaults = defaults;
-      const label = configRuntime === 'claude' ? 'Claude' : configRuntime === 'codex' ? 'Codex' : configRuntime;
+      const label = ICONS.labelForRuntime(configRuntime);
       defaultsFolder.textContent = `${label} defaults from ${context.target.projectPath}`;
       defaultsFolder.title = context.target.projectPath;
       configMode.value = SessionConfig.own(configs, configRuntime) ? 'custom' : 'defaults';

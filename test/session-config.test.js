@@ -95,6 +95,23 @@ test('model and effort are per-CLI settings that default to unset', () => {
   assert.throws(() => SessionConfig.normalizeOverrides('claude', { codexEffort: 'high' }), /Unsupported/);
 });
 
+test('Kimi settings are independent and preserve permission, model, and agent options', () => {
+  const options = SessionConfig.resolveOptions('kimi', {}, {
+    kimiPermissionMode: 'yolo', kimiPlan: true, kimiModel: 'kimi-code/k3', kimiEffort: 'high',
+    kimiAllowedTools: 'Read,Bash', kimiAgentInstructions: 'First line.\nSecond line.',
+  });
+  assert.equal(options.kimiPermissionMode, 'yolo');
+  assert.equal(options.kimiPlan, true);
+  assert.equal(options.kimiModel, 'kimi-code/k3');
+  assert.equal(options.kimiEffort, 'high');
+  assert.equal(options.kimiAgentInstructions, 'First line.\nSecond line.');
+  assert.throws(() => SessionConfig.normalizeOverrides('kimi', { permissionMode: 'plan' }), /Unsupported/);
+  assert.throws(() => SessionConfig.normalizeOverrides('kimi', { kimiPermissionMode: 'bypassPermissions' }), /Invalid Permission Mode/);
+  const args = require('../harnesses/kimi').buildLaunchArgs({ sessionId: 's', isNew: true, options });
+  assert.ok(args.includes('--yolo') && args.includes('--plan'));
+  assert.equal(args[args.indexOf('--model') + 1], 'kimi-code/k3');
+});
+
 test("a schedule's model and effort reach the argv of the CLI it runs on", async () => {
   const launches = [];
   const context = vm.createContext({ SessionConfig, window: { api: {

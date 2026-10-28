@@ -795,12 +795,9 @@ function buildSessionItem(session) {
   if (session.type === 'terminal') {
     markIcon.innerHTML = ICONS.terminal(14);
     mark.title = 'Terminal session';
-  } else if (session.runtime === 'codex') {
-    markIcon.innerHTML = ICONS.codex(14);
-    mark.title = 'Codex session';
   } else {
-    markIcon.innerHTML = ICONS.claude(14);
-    mark.title = 'Claude session';
+    markIcon.innerHTML = ICONS.forRuntime(session.runtime, 14);
+    mark.title = `${ICONS.labelForRuntime(session.runtime)} session`;
   }
 
   const dot = document.createElement('span');

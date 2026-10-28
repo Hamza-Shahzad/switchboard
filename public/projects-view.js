@@ -258,10 +258,34 @@ const PICONS = {
   x: (s = 12) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
 };
 
+let launchHarnesses = [
+  { id: 'claude', label: 'Claude' },
+  { id: 'codex', label: 'Codex' },
+  { id: 'kimi', label: 'Kimi' },
+];
+
+function syncLaunchHarnesses() {
+  if (!window.api?.getHarnesses) return;
+  window.api.getHarnesses().then(list => {
+    const enabled = (list || []).filter(h => h.enabled);
+    if (enabled.length) launchHarnesses = enabled;
+  }).catch(() => {});
+}
+
+syncLaunchHarnesses();
+window.api.onHarnessesChanged?.(syncLaunchHarnesses);
+
+function harnessLaunchRows(launch) {
+  return launchHarnesses.map(h => ({
+    label: h.label,
+    icon: ICONS.forRuntime(h.id, 14),
+    onClick: () => launch(h.id),
+  }));
+}
+
 function cliIcon(session, size = 14) {
   if (session.type === 'terminal') return ICONS.terminal(size);
-  if (session.runtime === 'codex') return ICONS.codex(size);
-  return ICONS.claude(size);
+  return ICONS.forRuntime(session.runtime, size);
 }
 
 // --- Tree helpers ---
@@ -524,8 +548,7 @@ function trackTagHtml(project, track) {
 
 function cliLabel(session) {
   if (session.type === 'terminal') return 'Terminal';
-  if (session.runtime === 'codex') return 'Codex';
-  return 'Claude';
+  return ICONS.labelForRuntime(session.runtime);
 }
 
 function sessionTitle(session) {
@@ -565,7 +588,7 @@ function buildSessionRow(project, session, { showTrack = true, className = 'pane
   // Started by a scheduled task: which one, and when it fired.
   if (session.scheduleId && typeof scheduleChipHtml === 'function') parts.push(scheduleChipHtml(session));
   // The CLI mark, same as the status bar: the logo says which CLI, no word needed.
-  parts.push(`<span class="pane-cli-icon${session.runtime === 'codex' ? ' is-codex' : ''}${session.type === 'terminal' ? ' is-terminal' : ''}" title="${escapeHtml(cliLabel(session))}">${cliIcon(session, 12)}</span>`);
+  parts.push(`<span class="pane-cli-icon${session.runtime ? ` is-${session.runtime}` : ''}${session.type === 'terminal' ? ' is-terminal' : ''}" title="${escapeHtml(cliLabel(session))}">${cliIcon(session, 12)}</span>`);
   // The last message's time, the same as the Sessions tab. A session with no
   // transcript yet shows when it started.
   parts.push(`<span>${escapeHtml(formatDate(new Date(session.modified || sessionEventTime(session))))}</span>`);
@@ -1398,7 +1421,7 @@ function buildTrackCard(project, track) {
     `<span class="tcard-meta mono">${track ? escapeHtml(cwdLabel) : 'sessions not in a track'}</span>` +
     (collapsed && sessions.length ? `<span class="tcard-meta">${sessions.length} session${sessions.length === 1 ? '' : 's'}</span>` : '') +
     `<span class="ws-flex"></span>` +
-    (track?.cli ? `<span class="ws-chip ws-chip--cli ${track.cli}" title="${escapeHtml(track.cli === 'codex' ? 'Codex' : 'Claude')}">${track.cli === 'codex' ? ICONS.codex(12) : ICONS.claude(12)}</span>` : '') +
+    (track?.cli ? `<span class="ws-chip ws-chip--cli ${track.cli}" title="${escapeHtml(ICONS.labelForRuntime(track.cli))}">${ICONS.forRuntime(track.cli, 12)}</span>` : '') +
     `<button type="button" class="ws-ghost ws-ghost--sm tcard-new">${PICONS.plus(11)}<span>New session</span></button>` +
     (track ? `<button type="button" class="tcard-more" title="Track menu">${PICONS.dots(13)}</button>` : '');
   card.appendChild(head);
@@ -1619,7 +1642,7 @@ function todoPrompt(data, item) {
   return `Work on this todo from ${data.todosPath}:\n\n${item.text}\n\nWhen it is done, tick it in todos.md.`;
 }
 
-/** Claude / Codex rows that launch with a first prompt, filed under the item. */
+/** CLI rows that launch with a first prompt, filed under the item. */
 function startItemRows(project, track, prompt, planItem) {
   const target = launchTargetFor(project, track);
   const launch = async (runtime) => {
@@ -1629,10 +1652,7 @@ function startItemRows(project, track, prompt, planItem) {
     options.planItem = planItem;
     launchNewSession(target, options);
   };
-  return [
-    { label: 'Claude', icon: ICONS.claude(14), onClick: () => launch('claude') },
-    { label: 'Codex', icon: ICONS.codex(14, 'codex-icon'), onClick: () => launch('codex') },
-  ];
+  return harnessLaunchRows(launch);
 }
 
 function showStartItemMenu(project, kind, itemText, prompt, anchor) {
@@ -3074,13 +3094,16 @@ function terminalLaunchItems(project, target) {
 
 function newSessionItems(project, track) {
   const target = launchTargetFor(project, track);
+  const launch = async (runtime) => {
+    const options = await resolveDefaultSessionOptions(target);
+    options.runtime = runtime;
+    launchNewSession(target, options);
+  };
   return [
-    { label: 'Claude', icon: ICONS.claude(14), onClick: async () => { const o = await resolveDefaultSessionOptions(target); o.runtime = 'claude'; launchNewSession(target, o); } },
-    { label: 'Codex', icon: ICONS.codex(14, 'codex-icon'), onClick: async () => { const o = await resolveDefaultSessionOptions(target); o.runtime = 'codex'; launchNewSession(target, o); } },
+    ...harnessLaunchRows(launch),
     ...terminalLaunchItems(project, target),
     { sep: true },
-    { label: 'Claude, configure…', muted: true, onClick: () => showNewSessionDialog(target, 'claude') },
-    { label: 'Codex, configure…', muted: true, onClick: () => showNewSessionDialog(target, 'codex') },
+    ...launchHarnesses.map(h => ({ label: `${h.label}, configure…`, muted: true, onClick: () => showNewSessionDialog(target, h.id) })),
   ];
 }
 
@@ -3182,11 +3205,10 @@ function trackMenuItems(project, track) {
     { label: 'Rename…', icon: PICONS.pencil(14), onClick: () => renameTrackFlow(project, track) },
     { label: 'Sessions start in', icon: PICONS.folder(14), hint: track.cwd ? pathBasename(track.cwd) : 'default',
       submenu: cwdOptions.map(o => ({ label: o.label, muted: (track.cwd || null) === o.value, hint: (track.cwd || null) === o.value ? 'current' : '', onClick: () => patch({ cwd: o.value }) })) },
-    { label: 'CLI', icon: PICONS.terminal(14), hint: track.cli ? (track.cli === 'codex' ? 'Codex' : 'Claude') : 'ask',
+    { label: 'CLI', icon: PICONS.terminal(14), hint: track.cli ? ICONS.labelForRuntime(track.cli) : 'ask',
       submenu: [
         { label: 'Ask each time', muted: !track.cli, onClick: () => patch({ cli: null }) },
-        { label: 'Claude', icon: ICONS.claude(14), muted: track.cli === 'claude', onClick: () => patch({ cli: 'claude' }) },
-        { label: 'Codex', icon: ICONS.codex(14, 'codex-icon'), muted: track.cli === 'codex', onClick: () => patch({ cli: 'codex' }) },
+        ...launchHarnesses.map(h => ({ label: h.label, icon: ICONS.forRuntime(h.id, 14), muted: track.cli === h.id, onClick: () => patch({ cli: h.id }) })),
       ] },
     { sep: true },
     { label: track.status === 'done' ? 'Reopen track' : 'Mark as done', icon: PICONS.check(14), onClick: () => toggleTrackDone(project, track, patch) },
