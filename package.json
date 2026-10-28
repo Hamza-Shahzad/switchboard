@@ -1,6 +1,6 @@
 {
   "name": "switchboard",
-  "version": "0.0.36",
+  "version": "0.0.37",
   "private": true,
   "description": "A desktop app for browsing, searching, and managing CLI coding sessions",
   "author": "Doctly <support@doctly.ai>",
@@ -74,7 +74,7 @@
     ],
     "publish": {
       "provider": "github",
-      "owner": "doctly",
+      "owner": "Hamza-Shahzad",
       "repo": "switchboard"
     },
     "mac": {
