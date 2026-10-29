@@ -30,7 +30,7 @@ try { require('electron-reloader')(module, { watchRenderer: true }); } catch {};
 // LC_CTYPE when the launch environment has no locale. See pty-env.js.
 const { buildPtyEnv } = require('./pty-env');
 const cleanPtyEnv = buildPtyEnv(process.env);
-const { shouldStartFresh, shouldBlockArchivedSession, pendingInitialPrompt } = require('./session-launch');
+const { shouldStartFresh, shouldBlockArchivedSession } = require('./session-launch');
 const { createTerminalActivity } = require('./terminal-activity');
 
 // Shell profiles → shell-profiles.js
@@ -45,8 +45,10 @@ const { PREVIEW_SCHEME, PREVIEW_SCHEMES, handlePreviewAssetRequest } = require('
 protocol.registerSchemesAsPrivileged(PREVIEW_SCHEMES);
 const { createTaskManager } = require('./task-manager');
 const { lastAssistantMessage } = require('./session-preview');
-const { createKimiAcpClient } = require('./kimi-acp-client');
-const { prepareKimiLaunch } = require('./kimi-launch');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
+const execFileAsync = promisify(execFile);
+const { parseKimiForkOutput, createKimiPromptDelivery } = require('./kimi-launch');
 const { createKimiStatus, readKimiStatus } = require('./kimi-status');
 const { materializeKimiAgentOptions } = require('./kimi-agent-options');
 
@@ -1380,42 +1382,23 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     sessionOptions = { ...sessionOptions, kimiAgentFile: agent.filePath };
   }
   try {
-    if (!isPlainTerminal && runtimeId === 'kimi' && startFresh && !hasKimiAgentOptions) {
+    // A fork is made with `kimi fork` first, which prints the child's id and
+    // exits; the PTY below then resumes the child like any existing session.
+    if (!isPlainTerminal && runtimeId === 'kimi' && startFresh && kimiForkFrom) {
       const pre = sessionOptions?.preLaunchCmd ? String(sessionOptions.preLaunchCmd) : '';
       if (/[\r\n]/.test(pre)) return { ok: false, error: 'preLaunchCmd must not contain newlines' };
-      const additionalDirectories = sessionOptions?.addDirs
-        ? String(sessionOptions.addDirs).split(',').map(d => d.trim()).filter(Boolean) : [];
-      const acpEnv = {
-        ...cleanPtyEnv, ...projectEnv,
-        ...harness.launchEnv?.(sessionId, sessionOptions),
-      };
-      // Run through the user's shell like the PTY below: an app launched from
-      // Finder has launchd's bare PATH, which won't include kimi's install dir.
-      const client = createKimiAcpClient({
-        cwd: projectPath,
-        env: acpEnv,
-        command: shell,
-        args: shellArgs(shell, `${pre ? pre + ' ' : ''}${harness.binary} acp`, shellExtraArgs),
+      // Through the user's shell like the PTY: an app launched from Finder has
+      // launchd's bare PATH, which won't include kimi's install dir.
+      const forkCmd = `${pre ? pre + ' ' : ''}${harness.binary} ${quoteArgvForShell(shell, ['fork', String(kimiForkFrom), '--yes'])}`;
+      const { stdout, stderr } = await execFileAsync(shell, shellArgs(shell, forkCmd, shellExtraArgs), {
+        cwd: projectPath, env: { ...cleanPtyEnv, ...projectEnv }, timeout: 30000,
       });
-      try {
-        await client.initialize();
-        preparedKimiSessionId = await prepareKimiLaunch(client, {
-          cwd: projectPath,
-          forkFrom: sessionOptions.forkFrom,
-          initialPrompt: sessionOptions.initialPrompt,
-          additionalDirectories,
-          model: sessionOptions.kimiModel,
-          permissionMode: sessionOptions.kimiPermissionMode,
-          plan: sessionOptions.kimiPlan,
-        });
-      } finally {
-        client.dispose();
+      preparedKimiSessionId = parseKimiForkOutput(stdout);
+      if (!preparedKimiSessionId) {
+        throw new Error(`kimi fork reported no session id${stderr.trim() ? `: ${stderr.trim().slice(-500)}` : ''}`);
       }
-      if (preparedKimiSessionId) {
-        sessionOptions = { ...sessionOptions };
-        delete sessionOptions.forkFrom;
-        delete sessionOptions.initialPrompt;
-      }
+      sessionOptions = { ...sessionOptions };
+      delete sessionOptions.forkFrom;
     }
     if (isPlainTerminal) {
       // Plain terminal: interactive login shell, no claude command
@@ -1530,14 +1513,18 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
       // A fork is identified by its parent, not by our env tag — codex copies
       // the originator from the thread being forked.
       forkFrom: kimiForkFrom,
-      initialPrompt: pendingInitialPrompt({
-        runtimeId, hasAgentOptions: hasKimiAgentOptions, initialPrompt: sessionOptions?.initialPrompt,
-      }),
       projectPath,
       spawnedAt: Date.now(),
     } : null,
     mcpServer, _openedAt: Date.now(),
   };
+  // Kimi takes no first prompt on its command line (plan items, schedules), so
+  // it is typed into the TUI once that is ready.
+  if (runtimeId === 'kimi' && startFresh && !kimiForkFrom && sessionOptions?.initialPrompt) {
+    session.kimiPromptDelivery = createKimiPromptDelivery(String(sessionOptions.initialPrompt), text => {
+      if (!session.exited) ptyProcess.write(text);
+    });
+  }
   const launchedSessionId = preparedKimiSessionId || sessionId;
   activeSessions.set(launchedSessionId, session);
   if (session.activity) startTerminalActivitySweep();
@@ -1578,6 +1565,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
 
   ptyProcess.onData(data => {
     const currentId = session.realSessionId || sessionId;
+    if (session.kimiPromptDelivery?.feed(data)) session.kimiPromptDelivery = null;
 
     // Prompt marks for a plain terminal. Cheap on every chunk: the parse
     // returns immediately unless the chunk actually contains an OSC 133.
@@ -1952,7 +1940,6 @@ function resolvePendingLaunches(candidatePaths) {
       if (activeSessions.has(signals.sessionId)) continue;
 
       const realId = signals.sessionId;
-      const initialPrompt = session.pendingLaunch.initialPrompt;
       log.info(`[launch-detect] ${tempId} → ${realId} (originator=${signals.originator || 'none'})`);
       session.realSessionId = realId;
       session.pendingLaunch = null;
@@ -1968,7 +1955,6 @@ function resolvePendingLaunches(candidatePaths) {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('session-detected', tempId, realId);
       }
-      if (initialPrompt && !session.exited) session.pty.write(initialPrompt + '\r');
       break;
     }
   }

@@ -1,55 +1,35 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { prepareKimiFork, prepareKimiInitialPrompt, prepareKimiLaunch } = require('../kimi-launch');
+const { parseKimiForkOutput, createKimiPromptDelivery } = require('../kimi-launch');
 
-test('fork closes the ACP session before returning the real id for PTY attach', async () => {
-  const calls = [];
-  const client = {
-    async fork(parent) { calls.push(['fork', parent]); return 'child'; },
-    async closeSession(id) { calls.push(['close', id]); },
-  };
-  assert.equal(await prepareKimiFork(client, 'parent'), 'child');
-  assert.deepEqual(calls, [['fork', 'parent'], ['close', 'child']]);
+test('fork output yields the child id, ignoring shell noise around it', () => {
+  assert.equal(
+    parseKimiForkOutput('rc says hi\nForked to session_e8152533-cdb7-4f1d-a1f6-2c2f4f0227b9 ("Fork: Reset") in 232ms\n'),
+    'session_e8152533-cdb7-4f1d-a1f6-2c2f4f0227b9',
+  );
+  assert.equal(parseKimiForkOutput('error: session not found'), null);
+  assert.equal(parseKimiForkOutput(undefined), null);
 });
 
-test('initial prompt applies model and mode, then completes and closes before PTY attach', async () => {
-  const calls = [];
-  const client = {
-    async newSession(input) { calls.push(['new', input]); return 'real'; },
-    async setConfigOption(id, key, value) { calls.push(['config', id, key, value]); },
-    async prompt(id, text) { calls.push(['prompt', id, text]); },
-    async closeSession(id) { calls.push(['close', id]); },
-  };
-  const additionalDirectories = ['/project', '/attached'];
-  assert.equal(await prepareKimiInitialPrompt(client, {
-    cwd: '/project', prompt: 'Do it', additionalDirectories, model: 'kimi-code/k3', permissionMode: 'yolo',
-  }), 'real');
-  assert.deepEqual(calls, [
-    ['new', { cwd: '/project', additionalDirectories }],
-    ['config', 'real', 'model', 'kimi-code/k3'],
-    ['config', 'real', 'mode', 'yolo'],
-    ['prompt', 'real', 'Do it'],
-    ['close', 'real'],
-  ]);
-});
+test('the first prompt waits for the welcome screen, then pastes and submits once', () => {
+  const writes = [];
+  const scheduled = [];
+  const delivery = createKimiPromptDelivery('line one\nline two', w => writes.push(w), {
+    schedule: fn => scheduled.push(fn),
+  });
 
-test('a failed close blocks PTY attach instead of creating concurrent writers', async () => {
-  const client = {
-    async fork() { return 'child'; },
-    async closeSession() { throw new Error('lock remains'); },
-  };
-  await assert.rejects(prepareKimiFork(client, 'parent'), /could not be closed/);
-});
+  // The folder-trust question comes first; nothing is typed into it.
+  assert.equal(delivery.feed('\x1b[1m Trust this folder?\x1b[22m'), false);
+  assert.deepEqual(writes, []);
 
-test('an unprompted new session is created and closed before PTY attach', async () => {
-  const calls = [];
-  const client = {
-    async newSession(input) { calls.push(['new', input]); return 'real'; },
-    async closeSession(id) { calls.push(['close', id]); },
-  };
-  assert.equal(await prepareKimiLaunch(client, { cwd: '/project', additionalDirectories: [] }), 'real');
-  assert.deepEqual(calls, [
-    ['new', { cwd: '/project', additionalDirectories: [] }],
-    ['close', 'real'],
-  ]);
+  // The marker can arrive split across chunks.
+  assert.equal(delivery.feed('Welcome to Ki'), false);
+  assert.equal(delivery.feed('mi Code\r\n'), true);
+  assert.deepEqual(writes, ['\x1b[200~line one\nline two\x1b[201~']);
+  scheduled.forEach(fn => fn());
+  assert.deepEqual(writes, ['\x1b[200~line one\nline two\x1b[201~', '\r']);
+
+  // A later redraw of the banner does not send it again.
+  assert.equal(delivery.feed('Welcome to Kimi Code'), true);
+  assert.equal(writes.length, 2);
 });

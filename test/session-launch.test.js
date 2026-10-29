@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { shouldStartFresh, shouldBlockArchivedSession, pendingInitialPrompt } = require('../session-launch');
+const { shouldStartFresh, shouldBlockArchivedSession } = require('../session-launch');
 const claude = require('../harnesses/claude');
 
 test('a pre-seeded session resumes before the cache indexer sees it', () => {
@@ -70,11 +70,4 @@ test('archive metadata does not block new or plain terminal launches', () => {
     isPlainTerminal: true,
     archived: 1,
   }), false);
-});
-
-test('only custom Kimi agent launches deliver a prompt after real-ID adoption', () => {
-  assert.equal(pendingInitialPrompt({ runtimeId: 'kimi', hasAgentOptions: true, initialPrompt: 'Do it' }), 'Do it');
-  assert.equal(pendingInitialPrompt({ runtimeId: 'kimi', hasAgentOptions: false, initialPrompt: 'Do it' }), null);
-  assert.equal(pendingInitialPrompt({ runtimeId: 'codex', hasAgentOptions: true, initialPrompt: 'Do it' }), null);
-  assert.equal(pendingInitialPrompt({ runtimeId: 'claude', hasAgentOptions: true, initialPrompt: 'Do it' }), null);
 });
