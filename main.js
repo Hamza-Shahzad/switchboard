@@ -1389,10 +1389,13 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
         ...cleanPtyEnv, ...projectEnv,
         ...harness.launchEnv?.(sessionId, sessionOptions),
       };
+      // Run through the user's shell like the PTY below: an app launched from
+      // Finder has launchd's bare PATH, which won't include kimi's install dir.
       const client = createKimiAcpClient({
         cwd: projectPath,
         env: acpEnv,
-        ...(pre ? { command: shell, args: shellArgs(shell, `${pre} kimi acp`, shellExtraArgs) } : {}),
+        command: shell,
+        args: shellArgs(shell, `${pre ? pre + ' ' : ''}${harness.binary} acp`, shellExtraArgs),
       });
       try {
         await client.initialize();
@@ -1492,6 +1495,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     }
   } catch (err) {
     if (kimiAgentCleanup) kimiAgentCleanup();
+    log.error(`[open-terminal] ${runtimeId} launch failed in ${projectPath}:`, err.message);
     return { ok: false, error: `Error spawning PTY: ${err.message}` };
   }
 

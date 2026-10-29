@@ -32,7 +32,8 @@ function createKimiAcpClient(options = {}) {
     while ((newline = stdout.indexOf('\n')) !== -1) {
       const line = stdout.slice(0, newline).trim();
       stdout = stdout.slice(newline + 1);
-      if (!line) continue;
+      // A login shell's rc files may print to stdout before kimi starts.
+      if (!line || line[0] !== '{') continue;
       let message;
       try { message = JSON.parse(line); } catch {
         fail(new Error('Kimi ACP returned malformed JSON'));

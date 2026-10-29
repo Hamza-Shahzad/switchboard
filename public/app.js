@@ -1057,6 +1057,8 @@ async function launchNewSession(project, sessionOptions, { focus = true } = {}) 
   if (!result.ok) {
     entry.terminal.write(`\r\nError: ${result.error}\r\n`);
     entry.closed = true;
+    // Show the error rather than failing with nothing on screen.
+    if (focus) showSession(sessionId);
     return;
   }
   if (typeof setSessionMcpActive === 'function') setSessionMcpActive(sessionId, !!result.mcpActive);
@@ -1156,6 +1158,8 @@ async function openSession(session, customOptions) {
   if (!result.ok) {
     entry.terminal.write(`\r\nError: ${result.error}\r\n`);
     entry.closed = true;
+    // Show the error rather than failing with nothing on screen.
+    if (focus) showSession(sessionId);
     return;
   }
   if (typeof setSessionMcpActive === 'function') setSessionMcpActive(sessionId, !!result.mcpActive);
