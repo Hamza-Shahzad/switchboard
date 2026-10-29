@@ -158,5 +158,12 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     }
+  },
+  "allowScripts": {
+    "better-sqlite3@12.8.0": true,
+    "electron@41.0.3": true,
+    "electron-winstaller@5.4.0": true,
+    "esbuild@0.27.3": true,
+    "node-pty@1.1.0": true
   }
 }
